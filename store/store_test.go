@@ -1,0 +1,427 @@
+package store
+
+import (
+	"testing"
+	"time"
+
+	"github.com/betternow/hstat/parser"
+)
+
+func TestNew(t *testing.T) {
+	s := New(5 * time.Minute)
+	if s == nil {
+		t.Fatal("expected store, got nil")
+	}
+	if s.window != 5*time.Minute {
+		t.Errorf("expected window 5m, got %v", s.window)
+	}
+	if s.TotalCount != 0 {
+		t.Errorf("expected TotalCount 0, got %d", s.TotalCount)
+	}
+}
+
+func TestAdd_NilEntry(t *testing.T) {
+	s := New(0)
+	s.Add(nil)
+	if s.TotalCount != 0 {
+		t.Errorf("expected TotalCount 0 after adding nil, got %d", s.TotalCount)
+	}
+}
+
+func TestAdd_SingleEntry(t *testing.T) {
+	s := New(0)
+	entry := &parser.Entry{
+		Timestamp: time.Now(),
+		Status:    200,
+		Service:   25,
+		Connect:   1,
+		Host:      "example.com",
+		IP:        "1.2.3.4",
+	}
+
+	s.Add(entry)
+
+	if s.TotalCount != 1 {
+		t.Errorf("expected TotalCount 1, got %d", s.TotalCount)
+	}
+	if s.StatusCounts[200] != 1 {
+		t.Errorf("expected status 200 count 1, got %d", s.StatusCounts[200])
+	}
+	if s.HostCounts["example.com"] != 1 {
+		t.Errorf("expected host count 1, got %d", s.HostCounts["example.com"])
+	}
+	if s.IPCounts["1.2.3.4"] != 1 {
+		t.Errorf("expected IP count 1, got %d", s.IPCounts["1.2.3.4"])
+	}
+}
+
+func TestAdd_EmptyHostAndIP(t *testing.T) {
+	s := New(0)
+	entry := &parser.Entry{
+		Timestamp: time.Now(),
+		Status:    200,
+		Host:      "",
+		IP:        "",
+	}
+
+	s.Add(entry)
+
+	if s.HostCounts["(unknown)"] != 1 {
+		t.Errorf("expected unknown host count 1, got %d", s.HostCounts["(unknown)"])
+	}
+	if s.IPCounts["(unknown)"] != 1 {
+		t.Errorf("expected unknown IP count 1, got %d", s.IPCounts["(unknown)"])
+	}
+}
+
+func TestAdd_MultipleEntries(t *testing.T) {
+	s := New(0)
+
+	for i := 0; i < 100; i++ {
+		status := 200
+		if i%10 == 0 {
+			status = 500
+		}
+		s.Add(&parser.Entry{
+			Timestamp: time.Now(),
+			Status:    status,
+			Service:   10 + i,
+			Host:      "example.com",
+			IP:        "1.2.3.4",
+		})
+	}
+
+	if s.TotalCount != 100 {
+		t.Errorf("expected TotalCount 100, got %d", s.TotalCount)
+	}
+	if s.StatusCounts[200] != 90 {
+		t.Errorf("expected status 200 count 90, got %d", s.StatusCounts[200])
+	}
+	if s.StatusCounts[500] != 10 {
+		t.Errorf("expected status 500 count 10, got %d", s.StatusCounts[500])
+	}
+}
+
+func TestGetStats_Empty(t *testing.T) {
+	s := New(0)
+	stats := s.GetStats()
+
+	if stats.TotalCount != 0 {
+		t.Errorf("expected TotalCount 0, got %d", stats.TotalCount)
+	}
+	if stats.AvgService != 0 {
+		t.Errorf("expected AvgService 0, got %d", stats.AvgService)
+	}
+}
+
+func TestGetStats_Percentiles(t *testing.T) {
+	s := New(0)
+
+	// Add 100 entries with service times 1-100
+	for i := 1; i <= 100; i++ {
+		s.Add(&parser.Entry{
+			Timestamp: time.Now(),
+			Status:    200,
+			Service:   i,
+			Connect:   1,
+		})
+	}
+
+	stats := s.GetStats()
+
+	if stats.TotalCount != 100 {
+		t.Errorf("expected TotalCount 100, got %d", stats.TotalCount)
+	}
+
+	// Avg should be ~50
+	if stats.AvgService < 49 || stats.AvgService > 51 {
+		t.Errorf("expected AvgService ~50, got %d", stats.AvgService)
+	}
+
+	// P50 should be ~50
+	if stats.P50Service < 49 || stats.P50Service > 51 {
+		t.Errorf("expected P50Service ~50, got %d", stats.P50Service)
+	}
+
+	// P95 should be ~95
+	if stats.P95Service < 94 || stats.P95Service > 96 {
+		t.Errorf("expected P95Service ~95, got %d", stats.P95Service)
+	}
+
+	// P99 should be ~99
+	if stats.P99Service < 98 || stats.P99Service > 100 {
+		t.Errorf("expected P99Service ~99, got %d", stats.P99Service)
+	}
+
+	// Max should be 100
+	if stats.MaxService != 100 {
+		t.Errorf("expected MaxService 100, got %d", stats.MaxService)
+	}
+}
+
+func TestGetStatusCounts(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 404, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 500, Host: "b.com", IP: "2.2.2.2"})
+
+	// Unfiltered
+	counts := s.GetStatusCounts("", "")
+	if len(counts) != 3 {
+		t.Errorf("expected 3 status codes, got %d", len(counts))
+	}
+
+	// Should be sorted by status code
+	if counts[0].Status != 200 || counts[0].Count != 2 {
+		t.Errorf("expected status 200 count 2 first, got %d count %d", counts[0].Status, counts[0].Count)
+	}
+
+	// Filtered by host
+	counts = s.GetStatusCounts("a.com", "")
+	if len(counts) != 2 {
+		t.Errorf("expected 2 status codes for host a.com, got %d", len(counts))
+	}
+
+	// Filtered by IP
+	counts = s.GetStatusCounts("", "2.2.2.2")
+	if len(counts) != 1 {
+		t.Errorf("expected 1 status code for IP 2.2.2.2, got %d", len(counts))
+	}
+	if counts[0].Status != 500 {
+		t.Errorf("expected status 500, got %d", counts[0].Status)
+	}
+}
+
+func TestGetTopHosts(t *testing.T) {
+	s := New(0)
+
+	// Add entries with different host frequencies
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "top.com", IP: "1.1.1.1"})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "mid.com", IP: "1.1.1.1"})
+	}
+	for i := 0; i < 2; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "low.com", IP: "1.1.1.1"})
+	}
+
+	// Get top 2
+	hosts := s.GetTopHosts(2, "")
+	if len(hosts) != 2 {
+		t.Errorf("expected 2 hosts, got %d", len(hosts))
+	}
+	if hosts[0].Label != "top.com" || hosts[0].Count != 10 {
+		t.Errorf("expected top.com with 10, got %s with %d", hosts[0].Label, hosts[0].Count)
+	}
+	if hosts[1].Label != "mid.com" || hosts[1].Count != 5 {
+		t.Errorf("expected mid.com with 5, got %s with %d", hosts[1].Label, hosts[1].Count)
+	}
+}
+
+func TestGetTopIPs(t *testing.T) {
+	s := New(0)
+
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "example.com", IP: "1.1.1.1"})
+	}
+	for i := 0; i < 3; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "example.com", IP: "2.2.2.2"})
+	}
+
+	ips := s.GetTopIPs(10, "")
+	if len(ips) != 2 {
+		t.Errorf("expected 2 IPs, got %d", len(ips))
+	}
+	if ips[0].Label != "1.1.1.1" || ips[0].Count != 10 {
+		t.Errorf("expected 1.1.1.1 with 10, got %s with %d", ips[0].Label, ips[0].Count)
+	}
+}
+
+func TestGetTopHosts_FilteredByIP(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "c.com", IP: "2.2.2.2"})
+
+	// Filter by IP 1.1.1.1 - should only see a.com and b.com
+	hosts := s.GetTopHosts(10, "1.1.1.1")
+	if len(hosts) != 2 {
+		t.Errorf("expected 2 hosts for IP 1.1.1.1, got %d", len(hosts))
+	}
+
+	// a.com should be first (2 requests)
+	if hosts[0].Label != "a.com" || hosts[0].Count != 2 {
+		t.Errorf("expected a.com with 2, got %s with %d", hosts[0].Label, hosts[0].Count)
+	}
+}
+
+func TestGetTopIPs_FilteredByHost(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "2.2.2.2"})
+	s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "3.3.3.3"})
+
+	// Filter by host a.com
+	ips := s.GetTopIPs(10, "a.com")
+	if len(ips) != 2 {
+		t.Errorf("expected 2 IPs for host a.com, got %d", len(ips))
+	}
+
+	// 1.1.1.1 should be first (2 requests)
+	if ips[0].Label != "1.1.1.1" || ips[0].Count != 2 {
+		t.Errorf("expected 1.1.1.1 with 2, got %s with %d", ips[0].Label, ips[0].Count)
+	}
+}
+
+func TestGetOtherCount(t *testing.T) {
+	s := New(0)
+
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "a.com"})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "b.com"})
+	}
+	for i := 0; i < 3; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "c.com"})
+	}
+	for i := 0; i < 2; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "d.com"})
+	}
+
+	// Get top 2 hosts
+	topHosts := s.GetTopHosts(2, "")
+
+	// Other should be c.com (3) + d.com (2) = 5
+	other := s.GetOtherCount(s.HostCounts, topHosts)
+	if other != 5 {
+		t.Errorf("expected other count 5, got %d", other)
+	}
+}
+
+func TestPrune_NoWindow(t *testing.T) {
+	s := New(0) // No window = keep all
+
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 200})
+	}
+
+	s.Prune()
+
+	if s.TotalCount != 10 {
+		t.Errorf("expected TotalCount 10 after prune with no window, got %d", s.TotalCount)
+	}
+}
+
+func TestPrune_WithWindow(t *testing.T) {
+	s := New(100 * time.Millisecond)
+
+	// Add old entry
+	oldEntry := &parser.Entry{
+		Timestamp: time.Now().Add(-200 * time.Millisecond),
+		Status:    200,
+		Host:      "old.com",
+		IP:        "1.1.1.1",
+	}
+	s.mu.Lock()
+	s.entries = append(s.entries, *oldEntry)
+	s.TotalCount++
+	s.StatusCounts[200]++
+	s.HostCounts["old.com"]++
+	s.IPCounts["1.1.1.1"]++
+	s.serviceTimes = append(s.serviceTimes, 0)
+	s.connectTimes = append(s.connectTimes, 0)
+	s.mu.Unlock()
+
+	// Add new entry
+	s.Add(&parser.Entry{
+		Timestamp: time.Now(),
+		Status:    200,
+		Host:      "new.com",
+		IP:        "2.2.2.2",
+	})
+
+	if s.TotalCount != 2 {
+		t.Errorf("expected TotalCount 2 before prune, got %d", s.TotalCount)
+	}
+
+	s.Prune()
+
+	if s.TotalCount != 1 {
+		t.Errorf("expected TotalCount 1 after prune, got %d", s.TotalCount)
+	}
+	if s.HostCounts["old.com"] != 0 {
+		t.Errorf("expected old.com count 0, got %d", s.HostCounts["old.com"])
+	}
+	if s.HostCounts["new.com"] != 1 {
+		t.Errorf("expected new.com count 1, got %d", s.HostCounts["new.com"])
+	}
+}
+
+func TestRelationships(t *testing.T) {
+	s := New(0)
+
+	// Multiple IPs hitting same host
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", IP: "2.2.2.2"})
+
+	// Same IP hitting multiple hosts
+	s.Add(&parser.Entry{Status: 200, Host: "web.com", IP: "1.1.1.1"})
+
+	// Check hostToIPs
+	if s.hostToIPs["api.com"]["1.1.1.1"] != 2 {
+		t.Errorf("expected api.com->1.1.1.1 count 2, got %d", s.hostToIPs["api.com"]["1.1.1.1"])
+	}
+	if s.hostToIPs["api.com"]["2.2.2.2"] != 1 {
+		t.Errorf("expected api.com->2.2.2.2 count 1, got %d", s.hostToIPs["api.com"]["2.2.2.2"])
+	}
+
+	// Check ipToHosts
+	if s.ipToHosts["1.1.1.1"]["api.com"] != 2 {
+		t.Errorf("expected 1.1.1.1->api.com count 2, got %d", s.ipToHosts["1.1.1.1"]["api.com"])
+	}
+	if s.ipToHosts["1.1.1.1"]["web.com"] != 1 {
+		t.Errorf("expected 1.1.1.1->web.com count 1, got %d", s.ipToHosts["1.1.1.1"]["web.com"])
+	}
+}
+
+func BenchmarkAdd(b *testing.B) {
+	s := New(5 * time.Minute)
+	entry := &parser.Entry{
+		Timestamp: time.Now(),
+		Status:    200,
+		Service:   25,
+		Connect:   1,
+		Host:      "example.com",
+		IP:        "1.2.3.4",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.Add(entry)
+	}
+}
+
+func BenchmarkGetStats(b *testing.B) {
+	s := New(0)
+	for i := 0; i < 10000; i++ {
+		s.Add(&parser.Entry{
+			Status:  200,
+			Service: i % 1000,
+			Connect: i % 100,
+		})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.GetStats()
+	}
+}

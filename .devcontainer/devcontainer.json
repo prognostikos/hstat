@@ -1,0 +1,24 @@
+{
+  "name": "hstat",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "dev",
+  "workspaceFolder": "/workspaces/hstat",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/hstat,type=bind",
+  "remoteEnv": {
+    "PATH": "/home/dev/.local/bin:/home/dev/.bun/bin:/home/dev/go/bin:/usr/local/go/bin:${containerEnv:PATH}"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": true,
+        "go.useLanguageServer": true
+      }
+    }
+  },
+  "postCreateCommand": "go mod download"
+}
