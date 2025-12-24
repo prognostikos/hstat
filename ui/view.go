@@ -60,22 +60,29 @@ func (m Model) View() string {
 	return content
 }
 
+const noDataWarningThreshold = 30 * time.Second
+
 func (m Model) renderHeader() string {
 	elapsed := time.Since(m.startTime).Round(time.Second)
 
-	status := "hstat"
-	if m.streamEnded {
-		status = "hstat (stream ended)"
-	}
-
-	header := fmt.Sprintf("%s | %s | %s reqs | %.1f/s avg",
-		status,
+	header := fmt.Sprintf("hstat | %s | %s reqs | %.1f/s avg",
 		elapsed,
 		formatNumber(m.stats.TotalCount),
 		float64(m.stats.TotalCount)/float64(max64(1, int64(elapsed.Seconds()))),
 	)
 
 	result := headerStyle.Render(header)
+
+	// Stream status warnings
+	if m.streamEnded {
+		result += "  " + streamEndedStyle.Render("⚠ STREAM ENDED")
+	} else if !m.lastEntryTime.IsZero() {
+		sinceLastEntry := time.Since(m.lastEntryTime)
+		if sinceLastEntry > noDataWarningThreshold {
+			secs := int(sinceLastEntry.Seconds())
+			result += "  " + warningStyle.Render(fmt.Sprintf("⚠ no data for %ds", secs))
+		}
+	}
 
 	// Filter indicator
 	if m.filter.Host != "" {

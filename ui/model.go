@@ -38,15 +38,16 @@ type Model struct {
 	refreshRate time.Duration
 
 	// UI state
-	width       int
-	height      int
-	section     Section
-	hostCursor  int
-	ipCursor    int
-	filter      Filter
-	showHelp    bool
-	streamEnded bool
-	modal       Modal
+	width         int
+	height        int
+	section       Section
+	hostCursor    int
+	ipCursor      int
+	filter        Filter
+	showHelp      bool
+	streamEnded   bool
+	lastEntryTime time.Time
+	modal         Modal
 
 	// Cached data for rendering
 	stats        store.Stats

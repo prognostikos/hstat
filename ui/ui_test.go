@@ -441,6 +441,100 @@ func TestIpinfoResultMsg(t *testing.T) {
 	}
 }
 
+func TestEntryMsg_UpdatesLastEntryTime(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+
+	// Initially zero
+	if !m.lastEntryTime.IsZero() {
+		t.Error("expected lastEntryTime to be zero initially")
+	}
+
+	before := time.Now()
+	newM, _ := m.Update(EntryMsg{Entry: testEntry(200, "test.com", "1.1.1.1")})
+	after := time.Now()
+
+	model := newM.(Model)
+	if model.lastEntryTime.Before(before) || model.lastEntryTime.After(after) {
+		t.Errorf("expected lastEntryTime between %v and %v, got %v", before, after, model.lastEntryTime)
+	}
+}
+
+func TestRenderHeader_ShowsNoDataWarning(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+
+	// Set lastEntryTime to 45 seconds ago
+	m.lastEntryTime = time.Now().Add(-45 * time.Second)
+
+	header := m.renderHeader()
+	if !strings.Contains(header, "no data") {
+		t.Errorf("expected 'no data' warning in header when no entries for 45s, got: %s", header)
+	}
+}
+
+func TestRenderHeader_NoWarningWhenRecentData(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+
+	// Set lastEntryTime to 5 seconds ago
+	m.lastEntryTime = time.Now().Add(-5 * time.Second)
+
+	header := m.renderHeader()
+	if strings.Contains(header, "no data") {
+		t.Errorf("expected no warning when data is recent, got: %s", header)
+	}
+}
+
+func TestRenderHeader_NoWarningWhenNoDataYet(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+
+	// lastEntryTime is zero (no data received yet)
+	header := m.renderHeader()
+	if strings.Contains(header, "no data") {
+		t.Errorf("expected no warning when no data received yet (still initializing), got: %s", header)
+	}
+}
+
+func TestRenderHeader_NoDataWarningNotShownWhenStreamEnded(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.streamEnded = true
+	m.lastEntryTime = time.Now().Add(-45 * time.Second)
+
+	header := m.renderHeader()
+	// When stream has ended, we show "stream ended" not "no data"
+	if strings.Contains(header, "no data") {
+		t.Errorf("expected no 'no data' warning when stream ended, got: %s", header)
+	}
+	if !strings.Contains(header, "STREAM ENDED") {
+		t.Errorf("expected 'STREAM ENDED' in header, got: %s", header)
+	}
+}
+
+func TestRenderHeader_StreamEndedIsProminent(t *testing.T) {
+	s := store.New(0)
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.streamEnded = true
+
+	header := m.renderHeader()
+	// Should contain STREAM ENDED in uppercase to be prominent
+	if !strings.Contains(header, "STREAM ENDED") {
+		t.Errorf("expected prominent 'STREAM ENDED' in header, got: %s", header)
+	}
+}
+
 // Test error for error case
 var errTest = testError{}
 

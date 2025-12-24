@@ -25,6 +25,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case EntryMsg:
 		m.store.Add(msg.Entry)
+		m.lastEntryTime = time.Now()
 		return m, nil
 
 	case TickMsg:

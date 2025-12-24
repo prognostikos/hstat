@@ -66,6 +66,15 @@ var (
 	// Help
 	helpStyle = lipgloss.NewStyle().Foreground(secondaryColor)
 
+	// Warning styles
+	warningStyle = lipgloss.NewStyle().
+			Foreground(warningColor).
+			Bold(true)
+
+	streamEndedStyle = lipgloss.NewStyle().
+				Foreground(errorColor).
+				Bold(true)
+
 	// Borders for sections
 	sectionStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
