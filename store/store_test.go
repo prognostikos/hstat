@@ -393,6 +393,108 @@ func TestRelationships(t *testing.T) {
 	}
 }
 
+func TestStatus101_ExcludedFromTimingStats(t *testing.T) {
+	s := New(0)
+
+	// Add normal entries with service times 10, 20, 30
+	s.Add(&parser.Entry{Status: 200, Service: 10, Connect: 1})
+	s.Add(&parser.Entry{Status: 200, Service: 20, Connect: 2})
+	s.Add(&parser.Entry{Status: 200, Service: 30, Connect: 3})
+
+	// Add 101 (WebSocket) with very high service time that would skew stats
+	s.Add(&parser.Entry{Status: 101, Service: 100000, Connect: 50000})
+
+	stats := s.GetStats()
+
+	// TotalCount should include the 101
+	if stats.TotalCount != 4 {
+		t.Errorf("expected TotalCount 4, got %d", stats.TotalCount)
+	}
+
+	// But timing stats should only reflect the 200s
+	if stats.AvgService != 20 {
+		t.Errorf("expected AvgService 20 (excluding 101), got %d", stats.AvgService)
+	}
+	if stats.MaxService != 30 {
+		t.Errorf("expected MaxService 30 (excluding 101), got %d", stats.MaxService)
+	}
+	if stats.AvgConnect != 2 {
+		t.Errorf("expected AvgConnect 2 (excluding 101), got %d", stats.AvgConnect)
+	}
+	if stats.MaxConnect != 3 {
+		t.Errorf("expected MaxConnect 3 (excluding 101), got %d", stats.MaxConnect)
+	}
+}
+
+func TestStatus101_StillCountedInStatusCounts(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 101, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 101, Host: "a.com", IP: "1.1.1.1"})
+
+	if s.StatusCounts[101] != 2 {
+		t.Errorf("expected status 101 count 2, got %d", s.StatusCounts[101])
+	}
+	if s.StatusCounts[200] != 1 {
+		t.Errorf("expected status 200 count 1, got %d", s.StatusCounts[200])
+	}
+	if s.TotalCount != 3 {
+		t.Errorf("expected TotalCount 3, got %d", s.TotalCount)
+	}
+}
+
+func TestPrune_WithStatus101(t *testing.T) {
+	s := New(100 * time.Millisecond)
+
+	// Manually add old entries - mix of 101 and 200
+	now := time.Now()
+	oldTime := now.Add(-200 * time.Millisecond)
+
+	s.mu.Lock()
+	// Old 200 entry (has timing data)
+	s.entries = append(s.entries, parser.Entry{Timestamp: oldTime, Status: 200, Host: "old.com", IP: "1.1.1.1"})
+	s.TotalCount++
+	s.StatusCounts[200]++
+	s.HostCounts["old.com"]++
+	s.IPCounts["1.1.1.1"]++
+	s.serviceTimes = append(s.serviceTimes, 10)
+	s.connectTimes = append(s.connectTimes, 1)
+
+	// Old 101 entry (no timing data)
+	s.entries = append(s.entries, parser.Entry{Timestamp: oldTime, Status: 101, Host: "old.com", IP: "1.1.1.1"})
+	s.TotalCount++
+	s.StatusCounts[101]++
+	s.HostCounts["old.com"]++
+	s.IPCounts["1.1.1.1"]++
+	// No serviceTimes/connectTimes for 101
+	s.mu.Unlock()
+
+	// Add new entries
+	s.Add(&parser.Entry{Timestamp: now, Status: 200, Service: 20, Connect: 2, Host: "new.com", IP: "2.2.2.2"})
+
+	if s.TotalCount != 3 {
+		t.Errorf("expected TotalCount 3 before prune, got %d", s.TotalCount)
+	}
+	if len(s.serviceTimes) != 2 {
+		t.Errorf("expected 2 service times before prune, got %d", len(s.serviceTimes))
+	}
+
+	s.Prune()
+
+	// Should have pruned both old entries
+	if s.TotalCount != 1 {
+		t.Errorf("expected TotalCount 1 after prune, got %d", s.TotalCount)
+	}
+	// Should have pruned only 1 timing entry (the 200, not the 101)
+	if len(s.serviceTimes) != 1 {
+		t.Errorf("expected 1 service time after prune, got %d", len(s.serviceTimes))
+	}
+	if s.serviceTimes[0] != 20 {
+		t.Errorf("expected remaining service time to be 20, got %d", s.serviceTimes[0])
+	}
+}
+
 func BenchmarkAdd(b *testing.B) {
 	s := New(5 * time.Minute)
 	entry := &parser.Entry{

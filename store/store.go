@@ -71,8 +71,11 @@ func (s *Store) Add(e *parser.Entry) {
 	s.StatusCounts[e.Status]++
 	s.HostCounts[host]++
 	s.IPCounts[ip]++
-	s.serviceTimes = append(s.serviceTimes, e.Service)
-	s.connectTimes = append(s.connectTimes, e.Connect)
+	// Skip 101 (WebSocket upgrade) for response time stats - they skew percentiles
+	if e.Status != 101 {
+		s.serviceTimes = append(s.serviceTimes, e.Service)
+		s.connectTimes = append(s.connectTimes, e.Connect)
+	}
 
 	// Track relationships
 	if s.hostToIPs[host] == nil {
@@ -129,6 +132,9 @@ func (s *Store) pruneOldest(count int) {
 		return
 	}
 
+	// Count non-101 entries being pruned (they have timing data)
+	timingCount := 0
+
 	// Decrement counts for pruned entries
 	for i := 0; i < count; i++ {
 		e := s.entries[i]
@@ -158,11 +164,15 @@ func (s *Store) pruneOldest(count int) {
 		if s.ipToStatus[ip] != nil {
 			s.ipToStatus[ip][e.Status]--
 		}
+
+		if e.Status != 101 {
+			timingCount++
+		}
 	}
 
 	s.entries = s.entries[count:]
-	s.serviceTimes = s.serviceTimes[count:]
-	s.connectTimes = s.connectTimes[count:]
+	s.serviceTimes = s.serviceTimes[timingCount:]
+	s.connectTimes = s.connectTimes[timingCount:]
 }
 
 // Stats returns computed statistics
