@@ -11,8 +11,8 @@ import (
 type Entry struct {
 	Timestamp time.Time
 	Status    int
-	Service   int    // ms
-	Connect   int    // ms
+	Service   int // ms
+	Connect   int // ms
 	Host      string
 	IP        string // first from fwd chain
 }
@@ -22,8 +22,8 @@ var (
 	serviceRe = regexp.MustCompile(`service=(\d+)ms`)
 	connectRe = regexp.MustCompile(`connect=(\d+)ms`)
 	hostRe    = regexp.MustCompile(`host=([^\s]+)`)
-	fwdRe     = regexp.MustCompile(`fwd="([^"]*)"`)          // quoted, possibly empty
-	fwdAltRe  = regexp.MustCompile(`fwd=([0-9][^\s]*)`)      // unquoted IP
+	fwdRe     = regexp.MustCompile(`fwd="([^"]*)"`)     // quoted, possibly empty
+	fwdAltRe  = regexp.MustCompile(`fwd=([0-9][^\s]*)`) // unquoted IP
 )
 
 // Parse parses a Heroku router log line into an Entry.

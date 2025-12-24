@@ -27,10 +27,10 @@ type Store struct {
 	connectTimes []int
 
 	// For filtered views
-	hostToIPs     map[string]map[string]int64 // host -> ip -> count
-	ipToHosts     map[string]map[string]int64 // ip -> host -> count
-	hostToStatus  map[string]map[int]int64    // host -> status -> count
-	ipToStatus    map[string]map[int]int64    // ip -> status -> count
+	hostToIPs    map[string]map[string]int64 // host -> ip -> count
+	ipToHosts    map[string]map[string]int64 // ip -> host -> count
+	hostToStatus map[string]map[int]int64    // host -> status -> count
+	ipToStatus   map[string]map[int]int64    // ip -> status -> count
 }
 
 // New creates a new Store with the given window duration
@@ -167,14 +167,14 @@ func (s *Store) pruneOldest(count int) {
 
 // Stats returns computed statistics
 type Stats struct {
-	TotalCount  int64
-	AvgService  int
-	P50Service  int
-	P95Service  int
-	P99Service  int
-	MaxService  int
-	AvgConnect  int
-	MaxConnect  int
+	TotalCount int64
+	AvgService int
+	P50Service int
+	P95Service int
+	P99Service int
+	MaxService int
+	AvgConnect int
+	MaxConnect int
 }
 
 // GetStats returns current statistics
