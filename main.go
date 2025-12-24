@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -88,15 +87,16 @@ func main() {
 	s := store.New(window)
 	m := ui.NewModel(s, *topN, refresh)
 
-	// Create program
-	p := tea.NewProgram(m, tea.WithAltScreen())
-
-	// Setup cleanup on exit
-	cleanup := func() {
-		// Restore terminal state
-		exec.Command("stty", "sane").Run()
+	// Open TTY for keyboard input (since stdin is the log pipe)
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening /dev/tty: %v\n", err)
+		os.Exit(1)
 	}
-	defer cleanup()
+	defer tty.Close()
+
+	// Create program with explicit TTY input
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithInput(tty))
 
 	// Handle signals for clean exit
 	sigChan := make(chan os.Signal, 1)
