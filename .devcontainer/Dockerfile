@@ -26,11 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
+    fzf \
     gnupg2 \
     jq \
     less \
     locales \
     man-db \
+    nodejs \
     openssh-client \
     ripgrep \
     sudo \
