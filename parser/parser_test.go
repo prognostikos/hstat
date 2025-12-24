@@ -159,3 +159,56 @@ func TestParse_MissingOptionalFields(t *testing.T) {
 		t.Errorf("expected empty IP, got %s", entry.IP)
 	}
 }
+
+func TestParse_Path(t *testing.T) {
+	line := `2024-01-15T10:30:00.000000+00:00 heroku[router]: at=info method=GET path="/api/users" host=example.com fwd="1.2.3.4" status=200 service=25ms`
+
+	entry := Parse(line)
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+
+	if entry.Path != "/api/users" {
+		t.Errorf("expected path /api/users, got %s", entry.Path)
+	}
+}
+
+func TestParse_PathWithQueryString(t *testing.T) {
+	line := `heroku[router]: path="/api/users?page=1&limit=10" host=example.com status=200 service=25ms`
+
+	entry := Parse(line)
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+
+	// Should extract path without query string
+	if entry.Path != "/api/users" {
+		t.Errorf("expected path /api/users (without query), got %s", entry.Path)
+	}
+}
+
+func TestParse_PathRoot(t *testing.T) {
+	line := `heroku[router]: path="/" host=example.com status=200 service=25ms`
+
+	entry := Parse(line)
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+
+	if entry.Path != "/" {
+		t.Errorf("expected path /, got %s", entry.Path)
+	}
+}
+
+func TestParse_PathMissing(t *testing.T) {
+	line := `heroku[router]: host=example.com status=200 service=25ms`
+
+	entry := Parse(line)
+	if entry == nil {
+		t.Fatal("expected entry, got nil")
+	}
+
+	if entry.Path != "" {
+		t.Errorf("expected empty path, got %s", entry.Path)
+	}
+}

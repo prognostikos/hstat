@@ -535,6 +535,64 @@ func TestRenderHeader_StreamEndedIsProminent(t *testing.T) {
 	}
 }
 
+func TestPathsShownWhenFilteredByHost(t *testing.T) {
+	s := store.New(0)
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/orders", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.filter.Host = "api.com"
+	m.refreshData()
+
+	// Should have paths cached
+	if len(m.topPaths) != 2 {
+		t.Errorf("expected 2 paths, got %d", len(m.topPaths))
+	}
+
+	// View should contain path information
+	view := m.View()
+	if !strings.Contains(view, "/users") {
+		t.Error("expected view to contain /users path")
+	}
+	if !strings.Contains(view, "/orders") {
+		t.Error("expected view to contain /orders path")
+	}
+}
+
+func TestPathsNotShownWithoutHostFilter(t *testing.T) {
+	s := store.New(0)
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.refreshData()
+
+	// Should have no paths cached without host filter
+	if len(m.topPaths) != 0 {
+		t.Errorf("expected 0 paths without host filter, got %d", len(m.topPaths))
+	}
+}
+
+func TestPathsSection_Title(t *testing.T) {
+	s := store.New(0)
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.filter.Host = "api.com"
+	m.refreshData()
+
+	view := m.View()
+	if !strings.Contains(view, "Paths") {
+		t.Error("expected view to contain 'Paths' section title when filtered by host")
+	}
+}
+
 // Test error for error case
 var errTest = testError{}
 

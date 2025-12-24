@@ -14,6 +14,7 @@ type Entry struct {
 	Service   int // ms
 	Connect   int // ms
 	Host      string
+	Path      string
 	IP        string // first from fwd chain
 }
 
@@ -22,6 +23,7 @@ var (
 	serviceRe = regexp.MustCompile(`service=(\d+)ms`)
 	connectRe = regexp.MustCompile(`connect=(\d+)ms`)
 	hostRe    = regexp.MustCompile(`host=([^\s]+)`)
+	pathRe    = regexp.MustCompile(`path="([^"]*)"`)
 	fwdRe     = regexp.MustCompile(`fwd="([^"]*)"`)     // quoted, possibly empty
 	fwdAltRe  = regexp.MustCompile(`fwd=([0-9][^\s]*)`) // unquoted IP
 )
@@ -57,6 +59,15 @@ func Parse(line string) *Entry {
 
 	if m := hostRe.FindStringSubmatch(line); m != nil {
 		entry.Host = m[1]
+	}
+
+	if m := pathRe.FindStringSubmatch(line); m != nil {
+		path := m[1]
+		// Strip query string
+		if idx := strings.Index(path, "?"); idx != -1 {
+			path = path[:idx]
+		}
+		entry.Path = path
 	}
 
 	if m := fwdRe.FindStringSubmatch(line); m != nil && m[1] != "" {

@@ -46,6 +46,12 @@ func (m Model) View() string {
 		b.WriteString(m.renderIPs())
 	}
 
+	// Paths section - only shown when filtering by host
+	if m.filter.Host != "" && len(m.topPaths) > 0 {
+		b.WriteString("\n")
+		b.WriteString(m.renderPaths())
+	}
+
 	// Footer with help hint
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("? help  w whois  i ipinfo  q quit"))
@@ -152,6 +158,39 @@ func (m Model) renderIPs() string {
 	active := m.section == SectionIPs
 	// Dim IPs when filtering BY IP (IP is the filter source)
 	return m.renderList("IPs", m.topIPs, m.otherIPs, m.ipCursor, active, m.filter.IP != "")
+}
+
+func (m Model) renderPaths() string {
+	var b strings.Builder
+
+	b.WriteString(sectionTitleStyle.Render("Paths"))
+	b.WriteString("\n")
+
+	if len(m.topPaths) == 0 {
+		b.WriteString(tableRowDimStyle.Render("  No data"))
+		return b.String()
+	}
+
+	// Calculate total for percentages
+	var total int64
+	for _, item := range m.topPaths {
+		total += item.Count
+	}
+
+	maxLabelLen := 40
+	for _, item := range m.topPaths {
+		label := item.Label
+		if len(label) > maxLabelLen {
+			label = label[:maxLabelLen-3] + "..."
+		}
+
+		pct := float64(item.Count) * 100 / float64(max64(1, total))
+		line := fmt.Sprintf("  %-*s  %8s  %5.1f%%", maxLabelLen, label, formatNumber(item.Count), pct)
+		b.WriteString(tableRowStyle.Render(line))
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 func (m Model) renderList(title string, items []store.CountItem, other int64, cursor int, active bool, dimmed bool) string {

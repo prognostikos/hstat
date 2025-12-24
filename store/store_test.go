@@ -495,6 +495,98 @@ func TestPrune_WithStatus101(t *testing.T) {
 	}
 }
 
+func TestPathTracking(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/orders", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "web.com", Path: "/home", IP: "1.1.1.1"})
+
+	// Get paths for api.com
+	paths := s.GetTopPaths(10, "api.com")
+	if len(paths) != 2 {
+		t.Errorf("expected 2 paths for api.com, got %d", len(paths))
+	}
+
+	// /users should be first (2 requests)
+	if paths[0].Label != "/users" || paths[0].Count != 2 {
+		t.Errorf("expected /users with 2, got %s with %d", paths[0].Label, paths[0].Count)
+	}
+
+	// /orders should be second (1 request)
+	if paths[1].Label != "/orders" || paths[1].Count != 1 {
+		t.Errorf("expected /orders with 1, got %s with %d", paths[1].Label, paths[1].Count)
+	}
+}
+
+func TestPathTracking_NoHost(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+
+	// Get paths for non-existent host
+	paths := s.GetTopPaths(10, "other.com")
+	if len(paths) != 0 {
+		t.Errorf("expected 0 paths for other.com, got %d", len(paths))
+	}
+}
+
+func TestPathTracking_EmptyPath(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+
+	paths := s.GetTopPaths(10, "api.com")
+	// Empty paths should be normalized to (unknown)
+	if len(paths) != 2 {
+		t.Errorf("expected 2 paths, got %d", len(paths))
+	}
+}
+
+func TestPathTracking_Prune(t *testing.T) {
+	s := New(100 * time.Millisecond)
+
+	now := time.Now()
+	oldTime := now.Add(-200 * time.Millisecond)
+
+	// Manually add old entry with path
+	s.mu.Lock()
+	s.entries = append(s.entries, parser.Entry{Timestamp: oldTime, Status: 200, Host: "api.com", Path: "/old", IP: "1.1.1.1"})
+	s.TotalCount++
+	s.StatusCounts[200]++
+	s.HostCounts["api.com"]++
+	s.IPCounts["1.1.1.1"]++
+	s.serviceTimes = append(s.serviceTimes, 0)
+	s.connectTimes = append(s.connectTimes, 0)
+	if s.hostToPaths["api.com"] == nil {
+		s.hostToPaths["api.com"] = make(map[string]int64)
+	}
+	s.hostToPaths["api.com"]["/old"]++
+	s.mu.Unlock()
+
+	// Add new entry
+	s.Add(&parser.Entry{Timestamp: now, Status: 200, Host: "api.com", Path: "/new", IP: "1.1.1.1"})
+
+	// Before prune
+	paths := s.GetTopPaths(10, "api.com")
+	if len(paths) != 2 {
+		t.Errorf("expected 2 paths before prune, got %d", len(paths))
+	}
+
+	s.Prune()
+
+	// After prune - only /new should remain
+	paths = s.GetTopPaths(10, "api.com")
+	if len(paths) != 1 {
+		t.Errorf("expected 1 path after prune, got %d", len(paths))
+	}
+	if paths[0].Label != "/new" {
+		t.Errorf("expected /new to remain, got %s", paths[0].Label)
+	}
+}
+
 func BenchmarkAdd(b *testing.B) {
 	s := New(5 * time.Minute)
 	entry := &parser.Entry{

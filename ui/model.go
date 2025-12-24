@@ -54,6 +54,7 @@ type Model struct {
 	statusCounts []store.StatusCountItem
 	topHosts     []store.CountItem
 	topIPs       []store.CountItem
+	topPaths     []store.CountItem
 	otherHosts   int64
 	otherIPs     int64
 }
@@ -114,6 +115,13 @@ func (m *Model) refreshData() {
 	m.statusCounts = m.store.GetStatusCounts(m.filter.Host, m.filter.IP)
 	m.topHosts = m.store.GetTopHosts(m.topN, m.filter.IP)
 	m.topIPs = m.store.GetTopIPs(m.topN, m.filter.Host)
+
+	// Get paths when filtering by host
+	if m.filter.Host != "" {
+		m.topPaths = m.store.GetTopPaths(m.topN, m.filter.Host)
+	} else {
+		m.topPaths = nil
+	}
 
 	// Calculate "other" counts
 	if m.filter.IP == "" {
