@@ -116,9 +116,9 @@ func (m *Model) refreshData() {
 	m.topHosts = m.store.GetTopHosts(m.topN, m.filter.IP)
 	m.topIPs = m.store.GetTopIPs(m.topN, m.filter.Host)
 
-	// Get paths when filtering by host
-	if m.filter.Host != "" {
-		m.topPaths = m.store.GetTopPaths(m.topN, m.filter.Host)
+	// Get paths when filtering by host or IP
+	if m.filter.Host != "" || m.filter.IP != "" {
+		m.topPaths = m.store.GetTopPaths(m.topN, m.filter.Host, m.filter.IP)
 	} else {
 		m.topPaths = nil
 	}

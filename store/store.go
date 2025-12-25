@@ -32,6 +32,7 @@ type Store struct {
 	hostToStatus map[string]map[int]int64    // host -> status -> count
 	ipToStatus   map[string]map[int]int64    // ip -> status -> count
 	hostToPaths  map[string]map[string]int64 // host -> path -> count
+	ipToPaths    map[string]map[string]int64 // ip -> path -> count
 }
 
 // New creates a new Store with the given window duration
@@ -46,6 +47,7 @@ func New(window time.Duration) *Store {
 		hostToStatus: make(map[string]map[int]int64),
 		ipToStatus:   make(map[string]map[int]int64),
 		hostToPaths:  make(map[string]map[string]int64),
+		ipToPaths:    make(map[string]map[string]int64),
 	}
 }
 
@@ -100,7 +102,7 @@ func (s *Store) Add(e *parser.Entry) {
 	}
 	s.ipToStatus[ip][e.Status]++
 
-	// Track paths per host
+	// Track paths per host and IP
 	path := e.Path
 	if path == "" {
 		path = "(unknown)"
@@ -109,6 +111,11 @@ func (s *Store) Add(e *parser.Entry) {
 		s.hostToPaths[host] = make(map[string]int64)
 	}
 	s.hostToPaths[host][path]++
+
+	if s.ipToPaths[ip] == nil {
+		s.ipToPaths[ip] = make(map[string]int64)
+	}
+	s.ipToPaths[ip][path]++
 
 	// Cap at maxEntries
 	if len(s.entries) > maxEntries {
@@ -183,6 +190,9 @@ func (s *Store) pruneOldest(count int) {
 		}
 		if s.hostToPaths[host] != nil {
 			s.hostToPaths[host][path]--
+		}
+		if s.ipToPaths[ip] != nil {
+			s.ipToPaths[ip][path]--
 		}
 
 		if e.Status != 101 {
@@ -334,16 +344,21 @@ func (s *Store) GetTopIPs(n int, filterHost string) []CountItem {
 	return s.topN(counts, n)
 }
 
-// GetTopPaths returns top N paths for a given host
-func (s *Store) GetTopPaths(n int, host string) []CountItem {
+// GetTopPaths returns top N paths for a given host or IP
+func (s *Store) GetTopPaths(n int, host, ip string) []CountItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if host == "" {
+	var counts map[string]int64
+
+	if host != "" {
+		counts = s.hostToPaths[host]
+	} else if ip != "" {
+		counts = s.ipToPaths[ip]
+	} else {
 		return nil
 	}
 
-	counts := s.hostToPaths[host]
 	return s.topN(counts, n)
 }
 

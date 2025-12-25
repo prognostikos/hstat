@@ -593,6 +593,37 @@ func TestPathsSection_Title(t *testing.T) {
 	}
 }
 
+func TestPathsShownWhenFilteredByIP(t *testing.T) {
+	s := store.New(0)
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "web.com", Path: "/orders", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/admin", IP: "2.2.2.2"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.filter.IP = "1.1.1.1"
+	m.refreshData()
+
+	// Should have paths cached for this IP
+	if len(m.topPaths) != 2 {
+		t.Errorf("expected 2 paths for IP 1.1.1.1, got %d", len(m.topPaths))
+	}
+
+	// View should contain path information
+	view := m.View()
+	if !strings.Contains(view, "/users") {
+		t.Error("expected view to contain /users path")
+	}
+	if !strings.Contains(view, "/orders") {
+		t.Error("expected view to contain /orders path")
+	}
+	if strings.Contains(view, "/admin") {
+		t.Error("expected view NOT to contain /admin path (belongs to different IP)")
+	}
+}
+
 func TestRenderPaths_CountsBeforePath(t *testing.T) {
 	s := store.New(0)
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})

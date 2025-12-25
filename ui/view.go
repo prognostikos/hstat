@@ -46,8 +46,8 @@ func (m Model) View() string {
 		b.WriteString(m.renderIPs())
 	}
 
-	// Paths section - only shown when filtering by host
-	if m.filter.Host != "" && len(m.topPaths) > 0 {
+	// Paths section - shown when filtering by host or IP
+	if (m.filter.Host != "" || m.filter.IP != "") && len(m.topPaths) > 0 {
 		b.WriteString("\n")
 		b.WriteString(m.renderPaths())
 	}
