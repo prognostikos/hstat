@@ -177,15 +177,23 @@ func (m Model) renderPaths() string {
 		total += item.Count
 	}
 
-	maxLabelLen := 40
+	// Calculate max path length based on terminal width
+	// Format: "  <count>  <pct>%  <path>"
+	// Fixed parts: 2 (indent) + 8 (count) + 2 (space) + 6 (pct%) + 2 (space) = 20 chars
+	fixedWidth := 20
+	maxPathLen := m.width - fixedWidth
+	if maxPathLen < 20 {
+		maxPathLen = 20
+	}
+
 	for _, item := range m.topPaths {
 		label := item.Label
-		if len(label) > maxLabelLen {
-			label = label[:maxLabelLen-3] + "..."
+		if len(label) > maxPathLen {
+			label = label[:maxPathLen-3] + "..."
 		}
 
 		pct := float64(item.Count) * 100 / float64(max64(1, total))
-		line := fmt.Sprintf("  %-*s  %8s  %5.1f%%", maxLabelLen, label, formatNumber(item.Count), pct)
+		line := fmt.Sprintf("  %8s  %5.1f%%  %s", formatNumber(item.Count), pct, label)
 		b.WriteString(tableRowStyle.Render(line))
 		b.WriteString("\n")
 	}

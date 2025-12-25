@@ -593,6 +593,97 @@ func TestPathsSection_Title(t *testing.T) {
 	}
 }
 
+func TestRenderPaths_CountsBeforePath(t *testing.T) {
+	s := store.New(0)
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 80
+	m.height = 50
+	m.filter.Host = "api.com"
+	m.refreshData()
+
+	paths := m.renderPaths()
+
+	// Find the line containing /users
+	lines := strings.Split(paths, "\n")
+	var pathLine string
+	for _, line := range lines {
+		if strings.Contains(line, "/users") {
+			pathLine = line
+			break
+		}
+	}
+
+	if pathLine == "" {
+		t.Fatal("expected to find line with /users")
+	}
+
+	// Count/percentage should appear before the path
+	// The line format should be: "  <count>  <pct>%  <path>"
+	stripped := stripAnsi(pathLine)
+	countIdx := strings.Index(stripped, "2") // count of 2
+	pathIdx := strings.Index(stripped, "/users")
+
+	if countIdx == -1 || pathIdx == -1 {
+		t.Fatalf("expected to find count and path in line: %q", stripped)
+	}
+
+	if countIdx > pathIdx {
+		t.Errorf("expected count before path, but count at %d, path at %d in: %q", countIdx, pathIdx, stripped)
+	}
+}
+
+func TestRenderPaths_WideTerminalExpandsPath(t *testing.T) {
+	s := store.New(0)
+	// Path long enough to be truncated at 60 chars but fit at 140 chars
+	longPath := "/api/v2/users/12345678/orders/87654321/items/details/extended/view"
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: longPath, IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.filter.Host = "api.com"
+
+	// Narrow terminal (width 80 - 20 fixed = 60 max path)
+	m.width = 80
+	m.height = 50
+	m.refreshData()
+	narrowPaths := m.renderPaths()
+	narrowStripped := stripAnsi(narrowPaths)
+
+	// Wide terminal (width 160 - 20 fixed = 140 max path)
+	m.width = 160
+	m.refreshData()
+	widePaths := m.renderPaths()
+	wideStripped := stripAnsi(widePaths)
+
+	// Count how much of the path is visible in each
+	narrowPathVisible := countPathChars(narrowStripped, longPath)
+	widePathVisible := countPathChars(wideStripped, longPath)
+
+	// Wide terminal should show more of the path (full path at 68 chars)
+	if widePathVisible <= narrowPathVisible {
+		t.Errorf("expected wide terminal to show more path chars (%d) than narrow (%d)",
+			widePathVisible, narrowPathVisible)
+	}
+}
+
+// countPathChars returns how many characters of the path are visible in the output
+func countPathChars(output, path string) int {
+	// Check if full path is present
+	if strings.Contains(output, path) {
+		return len(path)
+	}
+	// Otherwise check for truncated version
+	for i := len(path) - 1; i > 0; i-- {
+		prefix := path[:i]
+		if strings.Contains(output, prefix) {
+			return i
+		}
+	}
+	return 0
+}
+
 // Test error for error case
 var errTest = testError{}
 
