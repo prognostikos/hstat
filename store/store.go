@@ -414,3 +414,198 @@ func (s *Store) StartTime() time.Time {
 	}
 	return s.entries[0].Timestamp
 }
+
+// GetErrorRates returns the percentage of 4xx and 5xx responses
+func (s *Store) GetErrorRates() (rate4xx, rate5xx float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.TotalCount == 0 {
+		return 0, 0
+	}
+
+	var count4xx, count5xx int64
+	for status, count := range s.StatusCounts {
+		if status >= 400 && status < 500 {
+			count4xx += count
+		} else if status >= 500 && status < 600 {
+			count5xx += count
+		}
+	}
+
+	rate4xx = float64(count4xx) * 100 / float64(s.TotalCount)
+	rate5xx = float64(count5xx) * 100 / float64(s.TotalCount)
+	return
+}
+
+// GetUniqueCounts returns the count of unique hosts, IPs, and paths
+func (s *Store) GetUniqueCounts() (hosts, ips, paths int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, count := range s.HostCounts {
+		if count > 0 {
+			hosts++
+		}
+	}
+	for _, count := range s.IPCounts {
+		if count > 0 {
+			ips++
+		}
+	}
+
+	// Count unique paths across all hosts
+	pathSet := make(map[string]bool)
+	for _, pathCounts := range s.hostToPaths {
+		for path, count := range pathCounts {
+			if count > 0 {
+				pathSet[path] = true
+			}
+		}
+	}
+	paths = len(pathSet)
+
+	return
+}
+
+// GetCurrentRate returns the request rate over the given window
+func (s *Store) GetCurrentRate(window time.Duration) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.entries) == 0 {
+		return 0
+	}
+
+	cutoff := time.Now().Add(-window)
+	count := 0
+
+	// Count entries within the window (iterate backwards for efficiency)
+	for i := len(s.entries) - 1; i >= 0; i-- {
+		if s.entries[i].Timestamp.After(cutoff) {
+			count++
+		} else {
+			break
+		}
+	}
+
+	return float64(count) / window.Seconds()
+}
+
+// ErrorRates holds separate 4xx and 5xx error rates
+type ErrorRates struct {
+	Rate4xx float64
+	Rate5xx float64
+}
+
+// GetErrorRatesForHost returns separate 4xx and 5xx rates for a specific host
+func (s *Store) GetErrorRatesForHost(host string) ErrorRates {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.calculateErrorRates(s.hostToStatus[host])
+}
+
+// GetErrorRatesForIP returns separate 4xx and 5xx rates for a specific IP
+func (s *Store) GetErrorRatesForIP(ip string) ErrorRates {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.calculateErrorRates(s.ipToStatus[ip])
+}
+
+func (s *Store) calculateErrorRates(statusCounts map[int]int64) ErrorRates {
+	if statusCounts == nil {
+		return ErrorRates{}
+	}
+
+	var total, count4xx, count5xx int64
+	for status, count := range statusCounts {
+		if count > 0 {
+			total += count
+			if status >= 400 && status < 500 {
+				count4xx += count
+			} else if status >= 500 {
+				count5xx += count
+			}
+		}
+	}
+
+	if total == 0 {
+		return ErrorRates{}
+	}
+
+	return ErrorRates{
+		Rate4xx: float64(count4xx) * 100 / float64(total),
+		Rate5xx: float64(count5xx) * 100 / float64(total),
+	}
+}
+
+// Trend represents error rate trend direction
+type Trend int
+
+const (
+	TrendStable Trend = iota
+	TrendUp           // Error rate increasing (bad)
+	TrendDown         // Error rate decreasing (good)
+)
+
+// GetTrend compares error rate in recent period vs previous period
+func (s *Store) GetTrend(period time.Duration) Trend {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.entries) == 0 {
+		return TrendStable
+	}
+
+	now := time.Now()
+	recentCutoff := now.Add(-period)
+	oldCutoff := now.Add(-2 * period)
+
+	var recentTotal, recentErrors int64
+	var oldTotal, oldErrors int64
+
+	for _, e := range s.entries {
+		isError := e.Status >= 400
+
+		if e.Timestamp.After(recentCutoff) {
+			recentTotal++
+			if isError {
+				recentErrors++
+			}
+		} else if e.Timestamp.After(oldCutoff) {
+			oldTotal++
+			if isError {
+				oldErrors++
+			}
+		}
+	}
+
+	// Need sufficient data in both periods
+	if recentTotal < 10 || oldTotal < 10 {
+		return TrendStable
+	}
+
+	recentRate := float64(recentErrors) / float64(recentTotal)
+	oldRate := float64(oldErrors) / float64(oldTotal)
+
+	// Use 2 percentage points as threshold for significance
+	diff := recentRate - oldRate
+	if diff > 0.02 {
+		return TrendUp
+	} else if diff < -0.02 {
+		return TrendDown
+	}
+
+	return TrendStable
+}
+
+// addEntryAtTime is a helper for testing - adds entry with specific timestamp
+func (s *Store) addEntryAtTime(e *parser.Entry, t time.Time) {
+	if e == nil {
+		return
+	}
+	e.Timestamp = t
+	s.Add(e)
+}

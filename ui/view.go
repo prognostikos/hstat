@@ -71,13 +71,40 @@ const noDataWarningThreshold = 30 * time.Second
 func (m Model) renderHeader() string {
 	elapsed := time.Since(m.startTime).Round(time.Second)
 
-	header := fmt.Sprintf("hstat | %s | %s reqs | %.1f/s avg",
+	// Build header with current rate instead of lifetime average
+	header := fmt.Sprintf("hstat | %s | %s reqs | %.1f/s",
 		elapsed,
 		formatNumber(m.stats.TotalCount),
-		float64(m.stats.TotalCount)/float64(max64(1, int64(elapsed.Seconds()))),
+		m.currentRate,
 	)
 
 	result := headerStyle.Render(header)
+
+	// Error rates with trend
+	if m.stats.TotalCount > 0 {
+		errPart := ""
+		if m.rate4xx > 0 {
+			errPart += status4xxStyle.Render(fmt.Sprintf("4xx:%.1f%%", m.rate4xx))
+		}
+		if m.rate5xx > 0 {
+			if errPart != "" {
+				errPart += " "
+			}
+			errPart += status5xxStyle.Render(fmt.Sprintf("5xx:%.1f%%", m.rate5xx))
+		}
+
+		// Trend indicator
+		switch m.trend {
+		case store.TrendUp:
+			errPart += " " + trendUpStyle.Render("↑")
+		case store.TrendDown:
+			errPart += " " + trendDownStyle.Render("↓")
+		}
+
+		if errPart != "" {
+			result += "  " + errPart
+		}
+	}
 
 	// Stream status warnings
 	if m.streamEnded {
@@ -151,19 +178,20 @@ func (m Model) renderStatusCodes() string {
 func (m Model) renderHosts() string {
 	active := m.section == SectionHosts
 	// Dim hosts when filtering BY host (host is the filter source)
-	return m.renderList("Hosts", m.topHosts, m.otherHosts, m.hostCursor, active, m.filter.Host != "")
+	return m.renderTableWithErrors("Host", m.uniqueHosts, m.topHosts, m.otherHosts, m.hostCursor, active, m.filter.Host != "", m.hostErrRates)
 }
 
 func (m Model) renderIPs() string {
 	active := m.section == SectionIPs
 	// Dim IPs when filtering BY IP (IP is the filter source)
-	return m.renderList("IPs", m.topIPs, m.otherIPs, m.ipCursor, active, m.filter.IP != "")
+	return m.renderTableWithErrors("IP", m.uniqueIPs, m.topIPs, m.otherIPs, m.ipCursor, active, m.filter.IP != "", m.ipErrRates)
 }
 
 func (m Model) renderPaths() string {
 	var b strings.Builder
 
-	b.WriteString(sectionTitleStyle.Render("Paths"))
+	title := fmt.Sprintf("Paths (%d)", m.uniquePaths)
+	b.WriteString(sectionTitleStyle.Render(title))
 	b.WriteString("\n")
 
 	if len(m.topPaths) == 0 {
@@ -201,23 +229,31 @@ func (m Model) renderPaths() string {
 	return b.String()
 }
 
-func (m Model) renderList(title string, items []store.CountItem, other int64, cursor int, active bool, dimmed bool) string {
+func (m Model) renderTableWithErrors(columnName string, uniqueCount int, items []store.CountItem, other int64, cursor int, active bool, dimmed bool, errRates map[string]store.ErrorRates) string {
 	var b strings.Builder
 
-	titleStyle := sectionTitleStyle
+	maxLabelLen := 22
+
+	// Header row with column names
+	headerStyle := tableHeaderStyle
 	if active {
-		titleStyle = sectionTitleActiveStyle
+		headerStyle = sectionTitleActiveStyle
 	}
 
-	b.WriteString(titleStyle.Render(title))
+	// Build header: "  Host (42)              Count     %    4xx    5xx"
+	header := fmt.Sprintf("  %-*s  %8s  %5s  %5s  %5s",
+		maxLabelLen,
+		fmt.Sprintf("%s (%d)", columnName, uniqueCount),
+		"Count", "%", "4xx", "5xx")
+
+	b.WriteString(headerStyle.Render(header))
 	if active {
-		b.WriteString(" " + helpStyle.Render("[j/k Enter]"))
+		b.WriteString(" " + helpStyle.Render("[j/k]"))
 	}
 	b.WriteString("\n")
 
 	if len(items) == 0 {
-		style := tableRowDimStyle
-		b.WriteString(style.Render("  No data"))
+		b.WriteString(tableRowDimStyle.Render("  No data"))
 		return b.String()
 	}
 
@@ -228,7 +264,6 @@ func (m Model) renderList(title string, items []store.CountItem, other int64, cu
 	}
 	total += other
 
-	maxLabelLen := 30
 	for i, item := range items {
 		label := item.Label
 		if len(label) > maxLabelLen {
@@ -236,12 +271,50 @@ func (m Model) renderList(title string, items []store.CountItem, other int64, cu
 		}
 
 		pct := float64(item.Count) * 100 / float64(max64(1, total))
-		line := fmt.Sprintf("%-*s  %8s  %5.1f%%", maxLabelLen, label, formatNumber(item.Count), pct)
+
+		// Get error rates
+		var rate4xx, rate5xx float64
+		if rates, ok := errRates[item.Label]; ok {
+			rate4xx = rates.Rate4xx
+			rate5xx = rates.Rate5xx
+		}
+
+		// Determine if this row needs special styling (which prevents nested ANSI)
+		isSelected := active && i == cursor
+
+		// Build the line - for selected rows, don't use colored error rates
+		var line string
+		if dimmed || isSelected {
+			// Plain text for dimmed or selected rows
+			rate4xxStr := "    -"
+			rate5xxStr := "    -"
+			if rate4xx > 0 {
+				rate4xxStr = fmt.Sprintf("%5.1f", rate4xx)
+			}
+			if rate5xx > 0 {
+				rate5xxStr = fmt.Sprintf("%5.1f", rate5xx)
+			}
+			line = fmt.Sprintf("%-*s  %8s  %5.1f  %s  %s",
+				maxLabelLen, label, formatNumber(item.Count), pct, rate4xxStr, rate5xxStr)
+		} else {
+			// Colored error rates for normal rows
+			rate4xxStr := "    -"
+			rate5xxStr := "    -"
+			if rate4xx > 0 {
+				rate4xxStr = status4xxStyle.Render(fmt.Sprintf("%5.1f", rate4xx))
+			}
+			if rate5xx > 0 {
+				rate5xxStr = status5xxStyle.Render(fmt.Sprintf("%5.1f", rate5xx))
+			}
+			line = fmt.Sprintf("%-*s  %8s  %5.1f  %s  %s",
+				maxLabelLen, label, formatNumber(item.Count), pct, rate4xxStr, rate5xxStr)
+		}
 
 		var style lipgloss.Style
 		if dimmed {
+			line = "  " + line
 			style = tableRowDimStyle
-		} else if active && i == cursor {
+		} else if isSelected {
 			line = "> " + line
 			style = tableRowSelectedStyle
 		} else {
@@ -256,7 +329,7 @@ func (m Model) renderList(title string, items []store.CountItem, other int64, cu
 	// Other
 	if other > 0 {
 		pct := float64(other) * 100 / float64(max64(1, total))
-		line := fmt.Sprintf("  %-*s  %8s  %5.1f%%", maxLabelLen, "(other)", formatNumber(other), pct)
+		line := fmt.Sprintf("  %-*s  %8s  %5.1f", maxLabelLen, "(other)", formatNumber(other), pct)
 		b.WriteString(tableRowDimStyle.Render(line))
 		b.WriteString("\n")
 	}

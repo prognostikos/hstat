@@ -715,6 +715,153 @@ func countPathChars(output, path string) int {
 	return 0
 }
 
+func TestRenderHeader_ShowsCurrentRate(t *testing.T) {
+	s := store.New(0)
+	now := time.Now()
+
+	// Add entries in recent window
+	for i := 0; i < 20; i++ {
+		s.Add(&parser.Entry{
+			Timestamp: now.Add(-time.Duration(i) * 100 * time.Millisecond),
+			Status:    200,
+		})
+	}
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 120
+	m.height = 50
+	m.refreshData()
+
+	header := m.renderHeader()
+
+	// Should contain req/s indicator
+	if !strings.Contains(header, "/s") {
+		t.Errorf("expected header to contain rate indicator '/s', got: %s", header)
+	}
+}
+
+func TestRenderHeader_ShowsErrorRates(t *testing.T) {
+	s := store.New(0)
+
+	// Add mix of statuses
+	for i := 0; i < 80; i++ {
+		s.Add(&parser.Entry{Status: 200})
+	}
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 404})
+	}
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 500})
+	}
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 120
+	m.height = 50
+	m.refreshData()
+
+	header := m.renderHeader()
+
+	// Should contain 4xx and 5xx indicators
+	if !strings.Contains(header, "4xx") {
+		t.Errorf("expected header to contain '4xx', got: %s", header)
+	}
+	if !strings.Contains(header, "5xx") {
+		t.Errorf("expected header to contain '5xx', got: %s", header)
+	}
+}
+
+func TestRenderHosts_ShowsUniqueCount(t *testing.T) {
+	s := store.New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "c.com", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.refreshData()
+
+	hosts := m.renderHosts()
+
+	// Should contain count in parentheses
+	if !strings.Contains(hosts, "(3)") {
+		t.Errorf("expected hosts section to contain '(3)', got: %s", hosts)
+	}
+}
+
+func TestRenderIPs_ShowsUniqueCount(t *testing.T) {
+	s := store.New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "2.2.2.2"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.refreshData()
+
+	ips := m.renderIPs()
+
+	// Should contain count in parentheses
+	if !strings.Contains(ips, "(2)") {
+		t.Errorf("expected IPs section to contain '(2)', got: %s", ips)
+	}
+}
+
+func TestRenderHosts_ShowsErrorRate(t *testing.T) {
+	s := store.New(0)
+
+	// Host with 50% 5xx error rate
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "healthy.com", IP: "1.1.1.1"})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "broken.com", IP: "1.1.1.1"})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 500, Host: "broken.com", IP: "1.1.1.1"})
+	}
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.refreshData()
+
+	hosts := m.renderHosts()
+
+	// Should have table header with 4xx and 5xx columns
+	if !strings.Contains(hosts, "4xx") || !strings.Contains(hosts, "5xx") {
+		t.Errorf("expected hosts section to contain '4xx' and '5xx' headers, got: %s", hosts)
+	}
+
+	// Should show 50.0 for broken.com's 5xx rate
+	if !strings.Contains(hosts, "50.0") {
+		t.Errorf("expected hosts section to contain '50.0' for broken.com 5xx rate, got: %s", hosts)
+	}
+}
+
+func TestRenderPaths_ShowsUniqueCount(t *testing.T) {
+	s := store.New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/orders", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/products", IP: "1.1.1.1"})
+
+	m := NewModel(s, 15, time.Second)
+	m.width = 100
+	m.height = 50
+	m.filter.Host = "a.com"
+	m.refreshData()
+
+	paths := m.renderPaths()
+
+	// Should contain count in parentheses
+	if !strings.Contains(paths, "(3)") {
+		t.Errorf("expected paths section to contain '(3)', got: %s", paths)
+	}
+}
+
 // Test error for error case
 var errTest = testError{}
 

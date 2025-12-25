@@ -48,8 +48,8 @@ var (
 	tableRowStyle = lipgloss.NewStyle()
 
 	tableRowSelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255")).
-				Background(primaryColor)
+				Underline(true).
+				Bold(true)
 
 	tableRowDimStyle = lipgloss.NewStyle().
 				Foreground(dimColor)
@@ -103,6 +103,26 @@ var (
 	modalHintStyle = lipgloss.NewStyle().
 			Foreground(secondaryColor).
 			MarginTop(1)
+
+	// Trend indicators
+	trendUpStyle = lipgloss.NewStyle().
+			Foreground(errorColor).
+			Bold(true)
+
+	trendDownStyle = lipgloss.NewStyle().
+			Foreground(successColor).
+			Bold(true)
+
+	// Error rate inline
+	errorRateStyle = lipgloss.NewStyle().
+			Foreground(warningColor)
+
+	errorRateHighStyle = lipgloss.NewStyle().
+				Foreground(errorColor)
+
+	// Count badge style
+	countBadgeStyle = lipgloss.NewStyle().
+			Foreground(dimColor)
 )
 
 // StatusStyle returns the appropriate style for a status code

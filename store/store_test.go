@@ -667,6 +667,165 @@ func TestPathTracking_ByIP_Prune(t *testing.T) {
 	}
 }
 
+func TestGetErrorRates(t *testing.T) {
+	s := New(0)
+
+	// Add mix of status codes
+	for i := 0; i < 80; i++ {
+		s.Add(&parser.Entry{Status: 200})
+	}
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 404})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 500})
+	}
+	for i := 0; i < 5; i++ {
+		s.Add(&parser.Entry{Status: 503})
+	}
+
+	rate4xx, rate5xx := s.GetErrorRates()
+
+	// 10 out of 100 = 10% 4xx
+	if rate4xx < 9.9 || rate4xx > 10.1 {
+		t.Errorf("expected 4xx rate ~10%%, got %.1f%%", rate4xx)
+	}
+
+	// 10 out of 100 = 10% 5xx
+	if rate5xx < 9.9 || rate5xx > 10.1 {
+		t.Errorf("expected 5xx rate ~10%%, got %.1f%%", rate5xx)
+	}
+}
+
+func TestGetErrorRates_Empty(t *testing.T) {
+	s := New(0)
+	rate4xx, rate5xx := s.GetErrorRates()
+
+	if rate4xx != 0 || rate5xx != 0 {
+		t.Errorf("expected 0%% error rates for empty store, got 4xx=%.1f%%, 5xx=%.1f%%", rate4xx, rate5xx)
+	}
+}
+
+func TestGetUniqueCounts(t *testing.T) {
+	s := New(0)
+
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1", Path: "/users"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1", Path: "/users"})
+	s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "2.2.2.2", Path: "/orders"})
+	s.Add(&parser.Entry{Status: 200, Host: "c.com", IP: "1.1.1.1", Path: "/users"})
+
+	hosts, ips, paths := s.GetUniqueCounts()
+
+	if hosts != 3 {
+		t.Errorf("expected 3 unique hosts, got %d", hosts)
+	}
+	if ips != 2 {
+		t.Errorf("expected 2 unique IPs, got %d", ips)
+	}
+	if paths != 2 {
+		t.Errorf("expected 2 unique paths, got %d", paths)
+	}
+}
+
+func TestGetCurrentRate(t *testing.T) {
+	s := New(0)
+
+	now := time.Now()
+
+	// Add 10 entries from 30 seconds ago first (chronological order)
+	for i := 0; i < 10; i++ {
+		s.addEntryAtTime(&parser.Entry{Status: 200}, now.Add(-30*time.Second))
+	}
+
+	// Add 10 entries in the last 5 seconds
+	for i := 0; i < 10; i++ {
+		s.addEntryAtTime(&parser.Entry{Status: 200}, now.Add(-time.Duration(i)*500*time.Millisecond))
+	}
+
+	rate := s.GetCurrentRate(10 * time.Second)
+
+	// 10 entries in 10 seconds = 1.0 req/s
+	if rate < 0.9 || rate > 1.1 {
+		t.Errorf("expected rate ~1.0 req/s, got %.2f", rate)
+	}
+}
+
+func TestGetErrorRatesForHost(t *testing.T) {
+	s := New(0)
+
+	// Host a.com: 8 success, 1 4xx, 1 5xx
+	for i := 0; i < 8; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	}
+	s.Add(&parser.Entry{Status: 404, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 500, Host: "a.com", IP: "1.1.1.1"})
+
+	// Host b.com: all success
+	for i := 0; i < 10; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "2.2.2.2"})
+	}
+
+	ratesA := s.GetErrorRatesForHost("a.com")
+	ratesB := s.GetErrorRatesForHost("b.com")
+
+	if ratesA.Rate4xx < 9.9 || ratesA.Rate4xx > 10.1 {
+		t.Errorf("expected a.com 4xx rate ~10%%, got %.1f%%", ratesA.Rate4xx)
+	}
+	if ratesA.Rate5xx < 9.9 || ratesA.Rate5xx > 10.1 {
+		t.Errorf("expected a.com 5xx rate ~10%%, got %.1f%%", ratesA.Rate5xx)
+	}
+	if ratesB.Rate4xx != 0 || ratesB.Rate5xx != 0 {
+		t.Errorf("expected b.com error rates 0%%, got 4xx=%.1f%% 5xx=%.1f%%", ratesB.Rate4xx, ratesB.Rate5xx)
+	}
+}
+
+func TestGetErrorRatesForIP(t *testing.T) {
+	s := New(0)
+
+	// IP 1.1.1.1: 8 success, 1 4xx, 1 5xx
+	for i := 0; i < 8; i++ {
+		s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
+	}
+	s.Add(&parser.Entry{Status: 404, Host: "a.com", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 503, Host: "a.com", IP: "1.1.1.1"})
+
+	rates := s.GetErrorRatesForIP("1.1.1.1")
+
+	if rates.Rate4xx < 9.9 || rates.Rate4xx > 10.1 {
+		t.Errorf("expected 4xx rate ~10%%, got %.1f%%", rates.Rate4xx)
+	}
+	if rates.Rate5xx < 9.9 || rates.Rate5xx > 10.1 {
+		t.Errorf("expected 5xx rate ~10%%, got %.1f%%", rates.Rate5xx)
+	}
+}
+
+func TestGetTrend(t *testing.T) {
+	s := New(0)
+
+	now := time.Now()
+
+	// Old period (30-60s ago): 10 requests, 1 error = 10%
+	for i := 0; i < 9; i++ {
+		s.addEntryAtTime(&parser.Entry{Status: 200}, now.Add(-45*time.Second))
+	}
+	s.addEntryAtTime(&parser.Entry{Status: 500}, now.Add(-45*time.Second))
+
+	// Recent period (0-30s ago): 10 requests, 3 errors = 30%
+	for i := 0; i < 7; i++ {
+		s.addEntryAtTime(&parser.Entry{Status: 200}, now.Add(-15*time.Second))
+	}
+	for i := 0; i < 3; i++ {
+		s.addEntryAtTime(&parser.Entry{Status: 500}, now.Add(-15*time.Second))
+	}
+
+	trend := s.GetTrend(30 * time.Second)
+
+	// Error rate increased from 10% to 30%, trend should be positive (worsening)
+	if trend != TrendUp {
+		t.Errorf("expected TrendUp (error rate increased), got %v", trend)
+	}
+}
+
 func BenchmarkAdd(b *testing.B) {
 	s := New(5 * time.Minute)
 	entry := &parser.Entry{

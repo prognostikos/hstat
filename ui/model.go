@@ -57,6 +57,17 @@ type Model struct {
 	topPaths     []store.CountItem
 	otherHosts   int64
 	otherIPs     int64
+
+	// Additional stats
+	rate4xx      float64
+	rate5xx      float64
+	uniqueHosts  int
+	uniqueIPs    int
+	uniquePaths  int
+	currentRate  float64
+	trend        store.Trend
+	hostErrRates map[string]store.ErrorRates
+	ipErrRates   map[string]store.ErrorRates
 }
 
 // NewModel creates a new Model
@@ -108,6 +119,9 @@ func tickCmd(d time.Duration) tea.Cmd {
 	})
 }
 
+const currentRateWindow = 10 * time.Second
+const trendWindow = 30 * time.Second
+
 // refreshData updates cached data from the store
 func (m *Model) refreshData() {
 	m.store.Prune()
@@ -135,6 +149,22 @@ func (m *Model) refreshData() {
 		m.otherIPs = m.store.GetOtherCount(m.store.IPCounts, m.topIPs)
 	} else {
 		m.otherIPs = 0
+	}
+
+	// Additional stats
+	m.rate4xx, m.rate5xx = m.store.GetErrorRates()
+	m.uniqueHosts, m.uniqueIPs, m.uniquePaths = m.store.GetUniqueCounts()
+	m.currentRate = m.store.GetCurrentRate(currentRateWindow)
+	m.trend = m.store.GetTrend(trendWindow)
+
+	// Error rates per host/IP
+	m.hostErrRates = make(map[string]store.ErrorRates)
+	for _, h := range m.topHosts {
+		m.hostErrRates[h.Label] = m.store.GetErrorRatesForHost(h.Label)
+	}
+	m.ipErrRates = make(map[string]store.ErrorRates)
+	for _, ip := range m.topIPs {
+		m.ipErrRates[ip.Label] = m.store.GetErrorRatesForIP(ip.Label)
 	}
 
 	// Clamp cursors
