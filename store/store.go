@@ -2,6 +2,7 @@ package store
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,6 +10,33 @@ import (
 )
 
 const maxEntries = 100000
+
+// Paths to exclude from display
+var excludedPaths = []string{
+	"/ahoy/events",
+	"/ahoy/visits",
+	"/robots.txt",
+}
+
+var excludedPathPrefixes = []string{
+	"/system-status-",
+	"/hirefire",
+}
+
+// isExcludedPath returns true if the path should be hidden from display
+func isExcludedPath(path string) bool {
+	for _, excluded := range excludedPaths {
+		if path == excluded {
+			return true
+		}
+	}
+	for _, prefix := range excludedPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // Store holds time-windowed log data with pre-computed aggregates
 type Store struct {
@@ -359,7 +387,15 @@ func (s *Store) GetTopPaths(n int, host, ip string) []CountItem {
 		return nil
 	}
 
-	return s.topN(counts, n)
+	// Filter out excluded paths
+	filtered := make(map[string]int64)
+	for path, count := range counts {
+		if !isExcludedPath(path) {
+			filtered[path] = count
+		}
+	}
+
+	return s.topN(filtered, n)
 }
 
 func (s *Store) topN(counts map[string]int64, n int) []CountItem {
@@ -551,12 +587,19 @@ const (
 )
 
 // GetTrend compares error rate in recent period vs previous period
+// Returns the trend and the rate difference for hysteresis handling
 func (s *Store) GetTrend(period time.Duration) Trend {
+	_, trend := s.GetTrendWithDiff(period)
+	return trend
+}
+
+// GetTrendWithDiff returns both the rate difference and computed trend
+func (s *Store) GetTrendWithDiff(period time.Duration) (float64, Trend) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if len(s.entries) == 0 {
-		return TrendStable
+		return 0, TrendStable
 	}
 
 	now := time.Now()
@@ -584,21 +627,22 @@ func (s *Store) GetTrend(period time.Duration) Trend {
 
 	// Need sufficient data in both periods
 	if recentTotal < 10 || oldTotal < 10 {
-		return TrendStable
+		return 0, TrendStable
 	}
 
 	recentRate := float64(recentErrors) / float64(recentTotal)
 	oldRate := float64(oldErrors) / float64(oldTotal)
 
-	// Use 2 percentage points as threshold for significance
 	diff := recentRate - oldRate
+
+	// Use 2 percentage points as threshold for significance
 	if diff > 0.02 {
-		return TrendUp
+		return diff, TrendUp
 	} else if diff < -0.02 {
-		return TrendDown
+		return diff, TrendDown
 	}
 
-	return TrendStable
+	return diff, TrendStable
 }
 
 // addEntryAtTime is a helper for testing - adds entry with specific timestamp
@@ -608,4 +652,56 @@ func (s *Store) addEntryAtTime(e *parser.Entry, t time.Time) {
 	}
 	e.Timestamp = t
 	s.Add(e)
+}
+
+// GetAllPaths returns top N paths across all hosts/IPs
+func (s *Store) GetAllPaths(n int) []CountItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Aggregate all paths across all hosts, excluding hidden paths
+	pathCounts := make(map[string]int64)
+	for _, paths := range s.hostToPaths {
+		for path, count := range paths {
+			if count > 0 && !isExcludedPath(path) {
+				pathCounts[path] += count
+			}
+		}
+	}
+
+	return s.topN(pathCounts, n)
+}
+
+// GetErrorRatesForPath returns separate 4xx and 5xx rates for a specific path
+func (s *Store) GetErrorRatesForPath(path string) ErrorRates {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// We need to track path-to-status mapping
+	// For now, we'll iterate through entries
+	var total, count4xx, count5xx int64
+
+	for _, e := range s.entries {
+		p := e.Path
+		if p == "" {
+			p = "(unknown)"
+		}
+		if p == path {
+			total++
+			if e.Status >= 400 && e.Status < 500 {
+				count4xx++
+			} else if e.Status >= 500 {
+				count5xx++
+			}
+		}
+	}
+
+	if total == 0 {
+		return ErrorRates{}
+	}
+
+	return ErrorRates{
+		Rate4xx: float64(count4xx) * 100 / float64(total),
+		Rate5xx: float64(count5xx) * 100 / float64(total),
+	}
 }

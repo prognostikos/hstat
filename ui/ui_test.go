@@ -24,19 +24,13 @@ func testEntry(status int, host, ip string) *parser.Entry {
 
 func TestNewModel(t *testing.T) {
 	s := store.New(5 * time.Minute)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
-	if m.topN != 15 {
-		t.Errorf("expected topN 15, got %d", m.topN)
-	}
 	if m.refreshRate != time.Second {
 		t.Errorf("expected refreshRate 1s, got %v", m.refreshRate)
 	}
 	if m.section != SectionHosts {
 		t.Errorf("expected section SectionHosts, got %v", m.section)
-	}
-	if m.showHelp {
-		t.Error("expected showHelp false")
 	}
 	if m.modal.Visible {
 		t.Error("expected modal not visible")
@@ -175,7 +169,7 @@ func TestPadRight(t *testing.T) {
 
 func TestHandleKey_Quit(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
 	// Test 'q' key
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
@@ -186,26 +180,29 @@ func TestHandleKey_Quit(t *testing.T) {
 
 func TestHandleKey_Help(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
-	// Toggle help on
+	// Open help modal
 	newM, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	model := newM.(Model)
-	if !model.showHelp {
-		t.Error("expected showHelp true after pressing ?")
+	if !model.modal.Visible {
+		t.Error("expected help modal to be visible after pressing ?")
+	}
+	if model.modal.Title == "" {
+		t.Error("expected help modal to have title")
 	}
 
-	// Toggle help off
-	newM, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	// Close modal with Esc
+	newM, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	model = newM.(Model)
-	if model.showHelp {
-		t.Error("expected showHelp false after pressing ? again")
+	if model.modal.Visible {
+		t.Error("expected modal to be closed after pressing Esc")
 	}
 }
 
 func TestHandleKey_SectionNavigation(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 
@@ -236,7 +233,7 @@ func TestHandleKey_CursorMovement(t *testing.T) {
 		s.Add(testEntry(200, "host.com", "1.1.1.1"))
 	}
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
@@ -253,7 +250,7 @@ func TestHandleKey_Filter(t *testing.T) {
 	s.Add(testEntry(200, "api.com", "1.1.1.1"))
 	s.Add(testEntry(200, "web.com", "2.2.2.2"))
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
@@ -274,7 +271,7 @@ func TestHandleKey_Filter(t *testing.T) {
 
 func TestHandleKey_ModalDismissal(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.modal.Visible = true
 	m.modal.Content = "test content"
 
@@ -291,7 +288,7 @@ func TestHandleKey_ModalDismissal(t *testing.T) {
 
 func TestView_MinimumSize(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
 	// Zero size
 	m.width = 0
@@ -310,28 +307,30 @@ func TestView_MinimumSize(t *testing.T) {
 	}
 }
 
-func TestView_Help(t *testing.T) {
+func TestView_HelpModal(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
-	m.showHelp = true
+	m.modal.Visible = true
+	m.modal.Title = "Help"
+	m.modal.Content = helpContent()
 
 	view := m.View()
 	if !strings.Contains(view, "Navigation") {
-		t.Error("expected help to contain Navigation section")
+		t.Error("expected help modal to contain Navigation section")
 	}
 	if !strings.Contains(view, "Whois") {
-		t.Error("expected help to mention Whois")
+		t.Error("expected help modal to mention Whois")
 	}
 	if !strings.Contains(view, "ipinfo") {
-		t.Error("expected help to mention ipinfo")
+		t.Error("expected help modal to mention ipinfo")
 	}
 }
 
 func TestRenderWithModal_FixedPosition(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 30
 	m.modal.Visible = true
@@ -375,7 +374,7 @@ func TestStatusStyle(t *testing.T) {
 
 func TestWindowSizeMsg(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
 	newM, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	model := newM.(Model)
@@ -390,7 +389,7 @@ func TestWindowSizeMsg(t *testing.T) {
 
 func TestStreamEndedMsg(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
 	newM, _ := m.Update(StreamEndedMsg{})
 	model := newM.(Model)
@@ -402,7 +401,7 @@ func TestStreamEndedMsg(t *testing.T) {
 
 func TestWhoisResultMsg(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.modal.Visible = true
 	m.modal.Loading = true
 
@@ -427,7 +426,7 @@ func TestWhoisResultMsg(t *testing.T) {
 
 func TestIpinfoResultMsg(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.modal.Visible = true
 	m.modal.Loading = true
 
@@ -443,7 +442,7 @@ func TestIpinfoResultMsg(t *testing.T) {
 
 func TestEntryMsg_UpdatesLastEntryTime(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 
 	// Initially zero
 	if !m.lastEntryTime.IsZero() {
@@ -462,7 +461,7 @@ func TestEntryMsg_UpdatesLastEntryTime(t *testing.T) {
 
 func TestRenderHeader_ShowsNoDataWarning(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 
@@ -477,7 +476,7 @@ func TestRenderHeader_ShowsNoDataWarning(t *testing.T) {
 
 func TestRenderHeader_NoWarningWhenRecentData(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 
@@ -492,7 +491,7 @@ func TestRenderHeader_NoWarningWhenRecentData(t *testing.T) {
 
 func TestRenderHeader_NoWarningWhenNoDataYet(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 
@@ -505,7 +504,7 @@ func TestRenderHeader_NoWarningWhenNoDataYet(t *testing.T) {
 
 func TestRenderHeader_NoDataWarningNotShownWhenStreamEnded(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.streamEnded = true
@@ -523,7 +522,7 @@ func TestRenderHeader_NoDataWarningNotShownWhenStreamEnded(t *testing.T) {
 
 func TestRenderHeader_StreamEndedIsProminent(t *testing.T) {
 	s := store.New(0)
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.streamEnded = true
@@ -541,7 +540,7 @@ func TestPathsShownWhenFilteredByHost(t *testing.T) {
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/orders", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.filter.Host = "api.com"
@@ -562,18 +561,22 @@ func TestPathsShownWhenFilteredByHost(t *testing.T) {
 	}
 }
 
-func TestPathsNotShownWithoutHostFilter(t *testing.T) {
+func TestPathsShownWithoutFilter(t *testing.T) {
 	s := store.New(0)
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/orders", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
 
-	// Should have no paths cached without host filter
-	if len(m.topPaths) != 0 {
-		t.Errorf("expected 0 paths without host filter, got %d", len(m.topPaths))
+	// Paths should always be visible now (not just when filtered)
+	if len(m.topPaths) == 0 {
+		t.Error("expected paths to be visible without filter")
+	}
+	if len(m.topPaths) != 2 {
+		t.Errorf("expected 2 paths, got %d", len(m.topPaths))
 	}
 }
 
@@ -581,15 +584,16 @@ func TestPathsSection_Title(t *testing.T) {
 	s := store.New(0)
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.filter.Host = "api.com"
 	m.refreshData()
 
 	view := m.View()
-	if !strings.Contains(view, "Paths") {
-		t.Error("expected view to contain 'Paths' section title when filtered by host")
+	// Header now shows "Path (count)" instead of "Paths (count)"
+	if !strings.Contains(view, "Path") {
+		t.Error("expected view to contain 'Path' section title when filtered by host")
 	}
 }
 
@@ -600,7 +604,7 @@ func TestPathsShownWhenFilteredByIP(t *testing.T) {
 	s.Add(&parser.Entry{Status: 200, Host: "web.com", Path: "/orders", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/admin", IP: "2.2.2.2"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.filter.IP = "1.1.1.1"
@@ -624,13 +628,13 @@ func TestPathsShownWhenFilteredByIP(t *testing.T) {
 	}
 }
 
-func TestRenderPaths_CountsBeforePath(t *testing.T) {
+func TestRenderPaths_Format(t *testing.T) {
 	s := store.New(0)
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: "/users", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
-	m.width = 80
+	m := NewModel(s, time.Second)
+	m.width = 100
 	m.height = 50
 	m.filter.Host = "api.com"
 	m.refreshData()
@@ -651,18 +655,18 @@ func TestRenderPaths_CountsBeforePath(t *testing.T) {
 		t.Fatal("expected to find line with /users")
 	}
 
-	// Count/percentage should appear before the path
-	// The line format should be: "  <count>  <pct>%  <path>"
+	// Format is now: "  <path>  <count>  <pct>%  <4xx>  <5xx>"
+	// Should contain path, count, and percentage
 	stripped := stripAnsi(pathLine)
-	countIdx := strings.Index(stripped, "2") // count of 2
-	pathIdx := strings.Index(stripped, "/users")
 
-	if countIdx == -1 || pathIdx == -1 {
-		t.Fatalf("expected to find count and path in line: %q", stripped)
+	if !strings.Contains(stripped, "/users") {
+		t.Error("expected line to contain path")
 	}
-
-	if countIdx > pathIdx {
-		t.Errorf("expected count before path, but count at %d, path at %d in: %q", countIdx, pathIdx, stripped)
+	if !strings.Contains(stripped, "2") {
+		t.Error("expected line to contain count")
+	}
+	if !strings.Contains(stripped, "100.0") {
+		t.Error("expected line to contain percentage")
 	}
 }
 
@@ -672,7 +676,7 @@ func TestRenderPaths_WideTerminalExpandsPath(t *testing.T) {
 	longPath := "/api/v2/users/12345678/orders/87654321/items/details/extended/view"
 	s.Add(&parser.Entry{Status: 200, Host: "api.com", Path: longPath, IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.filter.Host = "api.com"
 
 	// Narrow terminal (width 80 - 20 fixed = 60 max path)
@@ -727,7 +731,7 @@ func TestRenderHeader_ShowsCurrentRate(t *testing.T) {
 		})
 	}
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 120
 	m.height = 50
 	m.refreshData()
@@ -754,7 +758,7 @@ func TestRenderHeader_ShowsErrorRates(t *testing.T) {
 		s.Add(&parser.Entry{Status: 500})
 	}
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 120
 	m.height = 50
 	m.refreshData()
@@ -777,7 +781,7 @@ func TestRenderHosts_ShowsUniqueCount(t *testing.T) {
 	s.Add(&parser.Entry{Status: 200, Host: "b.com", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "c.com", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
@@ -796,7 +800,7 @@ func TestRenderIPs_ShowsUniqueCount(t *testing.T) {
 	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "a.com", IP: "2.2.2.2"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
@@ -823,7 +827,7 @@ func TestRenderHosts_ShowsErrorRate(t *testing.T) {
 		s.Add(&parser.Entry{Status: 500, Host: "broken.com", IP: "1.1.1.1"})
 	}
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.refreshData()
@@ -848,7 +852,7 @@ func TestRenderPaths_ShowsUniqueCount(t *testing.T) {
 	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/orders", IP: "1.1.1.1"})
 	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/products", IP: "1.1.1.1"})
 
-	m := NewModel(s, 15, time.Second)
+	m := NewModel(s, time.Second)
 	m.width = 100
 	m.height = 50
 	m.filter.Host = "a.com"

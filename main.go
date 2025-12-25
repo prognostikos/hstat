@@ -21,10 +21,8 @@ func main() {
 	// Parse flags
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	showVersionShort := flag.Bool("v", false, "Show version and exit")
-	windowStr := flag.String("window", "5m", "Percentile calculation window (e.g., 5m, 10m, 1h, or 'all')")
+	windowStr := flag.String("window", "10m", "Data window (e.g., 5m, 10m, 1h, or 'all'). Must be at least 10m for 5m trend.")
 	windowShort := flag.String("w", "", "Shorthand for -window")
-	topN := flag.Int("top", 15, "Number of hosts/IPs to show")
-	topNShort := flag.Int("n", 0, "Shorthand for -top")
 	refreshStr := flag.String("refresh", "1s", "Screen refresh interval")
 	refreshShort := flag.String("r", "", "Shorthand for -refresh")
 
@@ -47,9 +45,6 @@ func main() {
 	// Handle shorthand flags
 	if *windowShort != "" {
 		windowStr = windowShort
-	}
-	if *topNShort != 0 {
-		topN = topNShort
 	}
 	if *refreshShort != "" {
 		refreshStr = refreshShort
@@ -85,7 +80,7 @@ func main() {
 
 	// Create store and model
 	s := store.New(window)
-	m := ui.NewModel(s, *topN, refresh)
+	m := ui.NewModel(s, refresh)
 
 	// Open TTY for keyboard input (since stdin is the log pipe)
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

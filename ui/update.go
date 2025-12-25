@@ -71,15 +71,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Help toggle
+	// Help as modal
 	if msg.String() == "?" {
-		m.showHelp = !m.showHelp
-		return m, nil
-	}
-
-	// If help is showing, any key dismisses it
-	if m.showHelp {
-		m.showHelp = false
+		m.modal.Visible = true
+		m.modal.Title = "hstat - Heroku Router Log Monitor"
+		m.modal.Content = helpContent()
+		m.modal.Loading = false
 		return m, nil
 	}
 

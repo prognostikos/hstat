@@ -858,3 +858,101 @@ func BenchmarkGetStats(b *testing.B) {
 		s.GetStats()
 	}
 }
+
+func TestGetAllPaths(t *testing.T) {
+	s := New(0)
+
+	// Add entries with different paths
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "b.com", Path: "/orders", IP: "2.2.2.2"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/admin", IP: "1.1.1.1"})
+
+	paths := s.GetAllPaths(10)
+
+	if len(paths) != 3 {
+		t.Errorf("expected 3 unique paths, got %d", len(paths))
+	}
+
+	// Should be sorted by count descending
+	if paths[0].Label != "/users" {
+		t.Errorf("expected first path to be /users, got %s", paths[0].Label)
+	}
+	if paths[0].Count != 2 {
+		t.Errorf("expected /users count 2, got %d", paths[0].Count)
+	}
+}
+
+func TestGetErrorRatesForPath(t *testing.T) {
+	s := New(0)
+
+	// Add entries with different statuses for paths
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 200, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 404, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Status: 500, Host: "a.com", Path: "/users", IP: "1.1.1.1"})
+
+	rates := s.GetErrorRatesForPath("/users")
+
+	// 1 out of 4 is 404, 1 out of 4 is 500
+	expectedRate4xx := 25.0
+	expectedRate5xx := 25.0
+
+	if rates.Rate4xx != expectedRate4xx {
+		t.Errorf("expected 4xx rate %.1f, got %.1f", expectedRate4xx, rates.Rate4xx)
+	}
+	if rates.Rate5xx != expectedRate5xx {
+		t.Errorf("expected 5xx rate %.1f, got %.1f", expectedRate5xx, rates.Rate5xx)
+	}
+}
+
+func TestGetAllPaths_Empty(t *testing.T) {
+	s := New(0)
+	paths := s.GetAllPaths(10)
+
+	if len(paths) != 0 {
+		t.Errorf("expected 0 paths, got %d", len(paths))
+	}
+}
+
+func TestGetErrorRatesForPath_NotFound(t *testing.T) {
+	s := New(0)
+	rates := s.GetErrorRatesForPath("/nonexistent")
+
+	if rates.Rate4xx != 0 || rates.Rate5xx != 0 {
+		t.Error("expected zero rates for nonexistent path")
+	}
+}
+
+func TestExcludedPaths(t *testing.T) {
+	s := New(0)
+
+	// Add some normal paths and excluded paths
+	s.Add(&parser.Entry{Host: "a.com", Path: "/api/users", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/ahoy/events", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/ahoy/visits", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/robots.txt", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/system-status-abc", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/hirefire/test", Status: 200, IP: "1.1.1.1"})
+	s.Add(&parser.Entry{Host: "a.com", Path: "/api/orders", Status: 200, IP: "1.1.1.1"})
+
+	// GetTopPaths should only return non-excluded paths
+	paths := s.GetTopPaths(10, "a.com", "")
+	if len(paths) != 2 {
+		t.Errorf("expected 2 paths, got %d", len(paths))
+	}
+
+	for _, p := range paths {
+		if p.Label == "/ahoy/events" || p.Label == "/ahoy/visits" ||
+			p.Label == "/robots.txt" || p.Label == "/system-status-abc" ||
+			p.Label == "/hirefire/test" {
+			t.Errorf("excluded path %s should not appear in results", p.Label)
+		}
+	}
+
+	// GetAllPaths should also filter
+	allPaths := s.GetAllPaths(10)
+	if len(allPaths) != 2 {
+		t.Errorf("expected 2 paths from GetAllPaths, got %d", len(allPaths))
+	}
+}

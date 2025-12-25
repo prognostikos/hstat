@@ -48,13 +48,13 @@ var (
 	tableRowStyle = lipgloss.NewStyle()
 
 	tableRowSelectedStyle = lipgloss.NewStyle().
-				Underline(true).
-				Bold(true)
+				Bold(true) // Bold only, no underline per spec
 
 	tableRowDimStyle = lipgloss.NewStyle().
 				Foreground(dimColor)
 
 	// Status code colors
+	status1xxStyle = lipgloss.NewStyle().Foreground(secondaryColor) // Informational
 	status2xxStyle = lipgloss.NewStyle().Foreground(successColor)
 	status3xxStyle = lipgloss.NewStyle().Foreground(primaryColor)
 	status4xxStyle = lipgloss.NewStyle().Foreground(warningColor)
@@ -75,22 +75,35 @@ var (
 				Foreground(errorColor).
 				Bold(true)
 
-	// Borders for sections
+	// Borders for sections - using sharp corners (NormalBorder)
 	sectionStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(secondaryColor).
 			Padding(0, 1)
 
 	sectionActiveStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
+				Border(lipgloss.NormalBorder()).
 				BorderForeground(accentColor).
 				Padding(0, 1)
 
-	// Modal styles
+	// Section border styles for the new layout
+	sectionBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(secondaryColor)
+
+	sectionActiveBorderStyle = lipgloss.NewStyle().
+					Border(lipgloss.NormalBorder()).
+					BorderForeground(accentColor) // Magenta/purple for active
+
+	// Modal styles - sharp corners
 	modalStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			BorderForeground(accentColor).
 			Padding(1, 2)
+
+	modalBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(accentColor)
 
 	modalTitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -134,7 +147,92 @@ func StatusStyle(status int) lipgloss.Style {
 		return status4xxStyle
 	case status >= 300:
 		return status3xxStyle
-	default:
+	case status >= 200:
 		return status2xxStyle
+	default:
+		return status1xxStyle
 	}
+}
+
+// StatusCategoryStyle returns the style for a status code category (1xx, 2xx, etc.)
+func StatusCategoryStyle(category int) lipgloss.Style {
+	switch category {
+	case 1:
+		return status1xxStyle
+	case 2:
+		return status2xxStyle
+	case 3:
+		return status3xxStyle
+	case 4:
+		return status4xxStyle
+	case 5:
+		return status5xxStyle
+	default:
+		return lipgloss.NewStyle()
+	}
+}
+
+// RenderSection renders content within a bordered section
+func RenderSection(title, content string, width int, active bool) string {
+	style := sectionBorderStyle
+	if active {
+		style = sectionActiveBorderStyle
+	}
+
+	// Build the section with title in the border
+	titleStr := "─ " + title + " "
+
+	// Create a custom border with title
+	border := lipgloss.NormalBorder()
+
+	styledContent := style.
+		Width(width - 2). // Account for border
+		BorderTop(true).
+		BorderBottom(true).
+		BorderLeft(true).
+		BorderRight(true).
+		Render(content)
+
+	// Replace top border with title
+	lines := splitLines(styledContent)
+	if len(lines) > 0 && len(lines[0]) > 3 {
+		remaining := width - len(titleStr) - 2
+		if remaining < 0 {
+			remaining = 0
+		}
+		newTop := string(border.TopLeft) + titleStr
+		for i := 0; i < remaining; i++ {
+			newTop += string(border.Top)
+		}
+		newTop += string(border.TopRight)
+		lines[0] = newTop
+	}
+
+	return joinLines(lines)
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+func joinLines(lines []string) string {
+	result := ""
+	for i, line := range lines {
+		if i > 0 {
+			result += "\n"
+		}
+		result += line
+	}
+	return result
 }
